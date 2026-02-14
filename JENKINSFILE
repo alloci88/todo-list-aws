@@ -1,7 +1,12 @@
 /*
  * ===========================================
- * CP1.4 - Reto 1 (CI) - Jenkinsfile (develop)
+ * CP1.4 - Reto 2 (CD) - JENKINSFILE (master)
  * ===========================================
+ *
+ * Stages:
+ * - Get Code (master)
+ * - Deploy (production)
+ * - Rest Test (READ ONLY) -> pytest -m readonly
  */
 
 def shLogged(String label, String script) {
@@ -13,7 +18,6 @@ ${script}
 
 def ensureReportsDirs() {
     shLogged('Ensure reports dirs', '''
-        mkdir -p reports/static
         mkdir -p reports/deploy
         mkdir -p reports/rest
     ''')
@@ -51,25 +55,16 @@ pipeline {
 
         // Repo
         REPO_URL = 'https://github.com/alloci88/todo-list-aws.git'
-        CI_BRANCH = 'develop'
         MASTER_BRANCH = 'master'
 
-        // Static reports
-        FLAKE8_OUT = 'reports/static/flake8.out'
-        BANDIT_OUT = 'reports/static/bandit.out'
-        BANDIT_JSON = 'reports/static/bandit.json'
-
-        // Deploy
-        STACK_NAME_STAGING = 'staging-todo-list-aws'
+        // Deploy (production)
+        STACK_NAME_PRODUCTION = 'todo-list-aws-production'
         API_URL_FILE = 'reports/deploy/api_url.txt'
 
-        // Rest tests
-        REST_JUNIT = 'reports/rest/junit-integration.xml'
+        // Rest tests (READ ONLY)
+        REST_JUNIT = 'reports/rest/junit-readonly.xml'
         INTEGRATION_TEST_FILE = 'test/integration/todoApiTest.py'
-
-        // Git identity
-        GIT_USER_NAME = 'jenkins-ci'
-        GIT_USER_EMAIL = 'jenkins-ci@example.local'
+        PYTEST_MARK = 'readonly'
     }
 
     stages {
@@ -81,7 +76,7 @@ pipeline {
 
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: "*/${env.CI_BRANCH}"]],
+                    branches: [[name: "*/${env.MASTER_BRANCH}"]],
                     userRemoteConfigs: [[url: "${env.REPO_URL}"]],
                     extensions: [[$class: 'CloneOption', shallow: false, depth: 0, noTags: false]]
                 ])
@@ -92,50 +87,6 @@ pipeline {
                       includes: '**/*',
                       excludes: '.git/**,reports/**,**/__pycache__/**',
                       useDefaultExcludes: false
-            }
-        }
-
-        stage('Static Test') {
-            steps {
-                logAgentInfo('Static Test')
-                deleteDir()
-                unstash 'SRC'
-                ensureReportsDirs()
-
-                shLogged('Run Flake8 (src only)', '''
-                    "$PYTHON_BIN" -m flake8 src \
-                      --exit-zero \
-                      --format=pylint \
-                      > "$FLAKE8_OUT"
-                ''')
-
-                shLogged('Run Bandit (src only)', '''
-                    "$PYTHON_BIN" -m bandit -r src \
-                      --exit-zero \
-                      -f custom -o "$BANDIT_OUT" \
-                      --msg-template "{abspath}:{line}: [{test_id}] {msg}"
-
-                    "$PYTHON_BIN" -m bandit -r src \
-                      --exit-zero \
-                      -f json -o "$BANDIT_JSON"
-                ''')
-
-                requireFile(env.FLAKE8_OUT)
-                requireFile(env.BANDIT_OUT)
-                requireFile(env.BANDIT_JSON)
-            }
-            post {
-                always {
-                    recordIssues(
-                        enabledForFailure: true,
-                        tools: [
-                            pyLint(id: 'flake8', name: 'Flake8', pattern: "${FLAKE8_OUT}"),
-                            pyLint(id: 'bandit', name: 'Bandit', pattern: "${BANDIT_OUT}")
-                        ]
-                    )
-
-                    archiveArtifacts artifacts: 'reports/static/*', fingerprint: true, allowEmptyArchive: false
-                }
             }
         }
 
@@ -154,9 +105,9 @@ pipeline {
                     sam validate --region "$AWS_REGION"
                 ''')
 
-                shLogged('SAM deploy (staging, non-interactive)', '''
+                shLogged('SAM deploy (production, non-interactive)', '''
                     sam deploy \
-                      --config-env staging \
+                      --config-env production \
                       --region "$AWS_REGION" \
                       --no-confirm-changeset \
                       --no-fail-on-empty-changeset
@@ -164,13 +115,13 @@ pipeline {
 
                 shLogged('Resolve API URL from CloudFormation outputs (BaseUrlApi)', '''
                     API_URL=$(aws --region "$AWS_REGION" cloudformation describe-stacks \
-                        --stack-name "$STACK_NAME_STAGING" \
+                        --stack-name "$STACK_NAME_PRODUCTION" \
                         --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue | [0]" \
                         --output text)
 
                     if [[ -z "$API_URL" || "$API_URL" == "None" ]]; then
                         echo "ERROR: BaseUrlApi not found in stack outputs"
-                        aws --region "$AWS_REGION" cloudformation describe-stacks --stack-name "$STACK_NAME_STAGING" --query "Stacks[0].Outputs" --output table || true
+                        aws --region "$AWS_REGION" cloudformation describe-stacks --stack-name "$STACK_NAME_PRODUCTION" --query "Stacks[0].Outputs" --output table || true
                         exit 1
                     fi
 
@@ -195,7 +146,7 @@ pipeline {
                 unstash 'DEPLOY_META'
                 ensureReportsDirs()
 
-                shLogged('Run Pytest integration (abort on fail)', '''
+                shLogged('Run Pytest READ-ONLY (abort on fail)', '''
                     export BASE_URL="$(cat "$API_URL_FILE")"
                     echo "BASE_URL=$BASE_URL"
 
@@ -203,6 +154,7 @@ pipeline {
 
                     "$PYTHON_BIN" -m pytest -q \
                       --junitxml="$REST_JUNIT" \
+                      -m "$PYTEST_MARK" \
                       "$INTEGRATION_TEST_FILE"
                 ''')
             }
@@ -210,49 +162,6 @@ pipeline {
                 always {
                     junit testResults: 'reports/rest/*.xml', allowEmptyResults: false
                     archiveArtifacts artifacts: 'reports/rest/*,reports/deploy/*', fingerprint: true, allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Promote') {
-            steps {
-                logAgentInfo('Promote')
-                deleteDir()
-
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${env.CI_BRANCH}"]],
-                    userRemoteConfigs: [[url: "${env.REPO_URL}"]],
-                    extensions: [[$class: 'CloneOption', shallow: false, depth: 0, noTags: false]]
-                ])
-
-                withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
-                    shLogged('Git promote develop -> master (protect Jenkinsfiles on master)', '''
-                        git config user.name "$GIT_USER_NAME"
-                        git config user.email "$GIT_USER_EMAIL"
-
-                        git remote set-url origin "https://$GH_TOKEN@github.com/alloci88/todo-list-aws.git"
-                        git fetch origin
-
-                        # SALIR DE DETACHED HEAD: crear/actualizar rama local desde origin/develop
-                        git checkout -B "$CI_BRANCH" "origin/$CI_BRANCH"
-
-                        echo "Promoted by Jenkins build $BUILD_NUMBER at $(date -Iseconds)" >> CHANGELOG.md
-                        git add CHANGELOG.md
-                        git commit -m "chore(release): promote build $BUILD_NUMBER" || true
-                        git push origin "$CI_BRANCH"
-
-                        git checkout "$MASTER_BRANCH"
-                        git pull origin "$MASTER_BRANCH"
-                        git merge --no-ff "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
-
-                        git checkout --ours Jenkinsfile 2>/dev/null || true
-                        git checkout --ours Jenkinsfile_agentes 2>/dev/null || true
-                        git add Jenkinsfile Jenkinsfile_agentes 2>/dev/null || true
-                        git commit --amend --no-edit || true
-
-                        git push origin "$MASTER_BRANCH"
-                    ''')
                 }
             }
         }
