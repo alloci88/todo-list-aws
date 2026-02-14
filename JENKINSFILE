@@ -46,19 +46,27 @@ pipeline {
     environment {
         PYTHON_BIN = '/opt/jenkins-tools/venv/bin/python'
 
+        // AWS
+        AWS_REGION = 'us-east-1'
+
+        // Repo
         REPO_URL = 'https://github.com/alloci88/todo-list-aws.git'
         CI_BRANCH = 'develop'
         MASTER_BRANCH = 'master'
 
+        // Static reports
         FLAKE8_OUT = 'reports/static/flake8.out'
         BANDIT_OUT = 'reports/static/bandit.out'
         BANDIT_JSON = 'reports/static/bandit.json'
 
+        // Deploy
         STACK_NAME_STAGING = 'staging-todo-list-aws'
         API_URL_FILE = 'reports/deploy/api_url.txt'
 
+        // Rest tests
         REST_JUNIT = 'reports/rest/junit-integration.xml'
 
+        // Git identity
         GIT_USER_NAME = 'jenkins-ci'
         GIT_USER_EMAIL = 'jenkins-ci@example.local'
     }
@@ -142,25 +150,26 @@ pipeline {
                 ''')
 
                 shLogged('SAM validate', '''
-                    sam validate
+                    sam validate --region "$AWS_REGION"
                 ''')
 
                 shLogged('SAM deploy (staging, non-interactive)', '''
                     sam deploy \
                       --config-env staging \
+                      --region "$AWS_REGION" \
                       --no-confirm-changeset \
                       --no-fail-on-empty-changeset
                 ''')
 
                 shLogged('Resolve API URL from CloudFormation outputs (BaseUrlApi)', '''
-                    API_URL=$(aws cloudformation describe-stacks \
+                    API_URL=$(aws --region "$AWS_REGION" cloudformation describe-stacks \
                         --stack-name "$STACK_NAME_STAGING" \
                         --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue | [0]" \
                         --output text)
 
                     if [[ -z "$API_URL" || "$API_URL" == "None" ]]; then
                         echo "ERROR: BaseUrlApi not found in stack outputs"
-                        aws cloudformation describe-stacks --stack-name "$STACK_NAME_STAGING" --query "Stacks[0].Outputs" --output table || true
+                        aws --region "$AWS_REGION" cloudformation describe-stacks --stack-name "$STACK_NAME_STAGING" --query "Stacks[0].Outputs" --output table || true
                         exit 1
                     fi
 
