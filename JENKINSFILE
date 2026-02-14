@@ -88,6 +88,7 @@ pipeline {
 
                 ensureReportsDirs()
 
+                // Stash SIN .git (para compartir código en stages de build/test)
                 stash name: 'SRC',
                       includes: '**/*',
                       excludes: '.git/**,reports/**,**/__pycache__/**',
@@ -218,7 +219,14 @@ pipeline {
             steps {
                 logAgentInfo('Promote')
                 deleteDir()
-                unstash 'SRC'
+
+                // Checkout REAL con .git para poder merge/push
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "*/${env.CI_BRANCH}"]],
+                    userRemoteConfigs: [[url: "${env.REPO_URL}"]],
+                    extensions: [[$class: 'CloneOption', shallow: false, depth: 0, noTags: false]]
+                ])
 
                 withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
                     shLogged('Git promote develop -> master (protect Jenkinsfiles on master)', '''
