@@ -177,7 +177,7 @@ pipeline {
 
                 // Base URL por Outputs -> OutputKey = BaseUrlApi (según tu template)
                 shLogged('Resolve API URL from CloudFormation outputs (BaseUrlApi)', """
-                    API_URL=$(aws cloudformation describe-stacks \\
+                    API_URL=\\$(aws cloudformation describe-stacks \\
                         --stack-name "${STACK_NAME_STAGING}" \\
                         --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue | [0]" \\
                         --output text)
@@ -210,7 +210,7 @@ pipeline {
                 ensureReportsDirs()
 
                 shLogged('Run Pytest integration (abort on fail)', """
-                    export BASE_URL="$(cat "${API_URL_FILE}")"
+                    export BASE_URL="\\$(cat "${API_URL_FILE}")"
                     echo "BASE_URL=${BASE_URL}"
 
                     "${PYTHON_BIN}" -m pytest -q \\
@@ -241,7 +241,7 @@ pipeline {
                         git fetch origin
 
                         # Forzar cambio "elegante" para que haya algo que mergear
-                        echo "Promoted by Jenkins build ${BUILD_NUMBER} at $(date -Iseconds)" >> CHANGELOG.md
+                        echo "Promoted by Jenkins build ${BUILD_NUMBER} at \\$(date -Iseconds)" >> CHANGELOG.md
                         git add CHANGELOG.md
                         git commit -m "chore(release): promote build ${BUILD_NUMBER}" || true
                         git push origin "${CI_BRANCH}"
@@ -267,3 +267,4 @@ pipeline {
         }
     }
 }
+
