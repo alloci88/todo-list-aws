@@ -246,9 +246,10 @@ pipeline {
                         git pull origin "$MASTER_BRANCH"
                         git merge --no-ff "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
 
-                        git checkout --ours Jenkinsfile 2>/dev/null || true
-                        git checkout --ours Jenkinsfile_agentes 2>/dev/null || true
-                        git add Jenkinsfile Jenkinsfile_agentes 2>/dev/null || true
+                        # PROTECCIÓN REAL (nombres en mayúsculas)
+                        git checkout --ours JENKINSFILE 2>/dev/null || true
+                        git checkout --ours JENKINSFILE_agentes 2>/dev/null || true
+                        git add JENKINSFILE JENKINSFILE_agentes 2>/dev/null || true
                         git commit --amend --no-edit || true
 
                         git push origin "$MASTER_BRANCH"
