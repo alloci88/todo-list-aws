@@ -5,9 +5,6 @@
  */
 
 def shLogged(String label, String script) {
-    // IMPORTANTE:
-    // - NO interpolamos Groovy dentro del script.
-    // - Bash resolverá $VARS desde environment {}.
     sh(label: label, script: """#!/usr/bin/env bash
 set -euo pipefail
 ${script}
@@ -23,7 +20,6 @@ def ensureReportsDirs() {
 }
 
 def logAgentInfo(String stageName) {
-    // Aquí sí interpolamos stageName (Groovy), pero el bash va en comillas simples.
     shLogged("Agent info (${stageName})", '''
         echo "=== Agent info ==="
         whoami || true
@@ -33,7 +29,6 @@ def logAgentInfo(String stageName) {
 }
 
 def requireFile(String path) {
-    // Interpolación Groovy SOLO para el path (seguro), y bash literal dentro.
     shLogged("Require file: ${path}", """
         test -f '${path}'
         echo "OK: found ${path}"
@@ -125,8 +120,8 @@ pipeline {
                     recordIssues(
                         enabledForFailure: true,
                         tools: [
-                            pyLint(name: 'Flake8', pattern: "${FLAKE8_OUT}"),
-                            pyLint(name: 'Bandit', pattern: "${BANDIT_OUT}")
+                            pyLint(id: 'flake8', name: 'Flake8', pattern: "${FLAKE8_OUT}"),
+                            pyLint(id: 'bandit', name: 'Bandit', pattern: "${BANDIT_OUT}")
                         ]
                     )
 
