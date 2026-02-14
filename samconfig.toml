@@ -20,12 +20,11 @@ region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
 parameter_overrides = "Stage=\"staging\""
 image_repositories = []
-resolve_s3 = true
-confirm_changeset = true
-
+confirm_changeset = false
 
 [staging.global.parameters]
 region = "us-east-1"
+
 [production]
 [production.deploy]
 [production.deploy.parameters]
