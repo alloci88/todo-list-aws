@@ -88,7 +88,6 @@ pipeline {
 
                 ensureReportsDirs()
 
-                // Stash SIN .git (para compartir código en stages de build/test)
                 stash name: 'SRC',
                       includes: '**/*',
                       excludes: '.git/**,reports/**,**/__pycache__/**',
@@ -220,7 +219,6 @@ pipeline {
                 logAgentInfo('Promote')
                 deleteDir()
 
-                // Checkout REAL con .git para poder merge/push
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: "*/${env.CI_BRANCH}"]],
@@ -235,6 +233,9 @@ pipeline {
 
                         git remote set-url origin "https://$GH_TOKEN@github.com/alloci88/todo-list-aws.git"
                         git fetch origin
+
+                        # SALIR DE DETACHED HEAD: crear/actualizar rama local desde origin/develop
+                        git checkout -B "$CI_BRANCH" "origin/$CI_BRANCH"
 
                         echo "Promoted by Jenkins build $BUILD_NUMBER at $(date -Iseconds)" >> CHANGELOG.md
                         git add CHANGELOG.md
