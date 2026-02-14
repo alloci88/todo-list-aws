@@ -65,6 +65,7 @@ pipeline {
 
         // Rest tests
         REST_JUNIT = 'reports/rest/junit-integration.xml'
+        INTEGRATION_TEST_FILE = 'test/integration/todoApiTest.py'
 
         // Git identity
         GIT_USER_NAME = 'jenkins-ci'
@@ -198,9 +199,11 @@ pipeline {
                     export BASE_URL="$(cat "$API_URL_FILE")"
                     echo "BASE_URL=$BASE_URL"
 
+                    test -f "$INTEGRATION_TEST_FILE"
+
                     "$PYTHON_BIN" -m pytest -q \
                       --junitxml="$REST_JUNIT" \
-                      test/integration
+                      "$INTEGRATION_TEST_FILE"
                 ''')
             }
             post {
