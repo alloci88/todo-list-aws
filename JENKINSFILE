@@ -256,28 +256,29 @@ pipeline {
                     shLogged('Git promote develop -> master (NEVER overwrite Jenkinsfiles in master)', '''
                         git config user.name "$GIT_USER_NAME"
                         git config user.email "$GIT_USER_EMAIL"
-                        
+                
                         git remote set-url origin "https://$GH_TOKEN@github.com/alloci88/todo-list-aws.git"
                         git fetch origin
-                        
+                
                         git checkout -B "$CI_BRANCH" "origin/$CI_BRANCH"
-                        
+                
                         echo "Promoted by Jenkins build $BUILD_NUMBER at $(date -Iseconds)" >> CHANGELOG.md
                         git add CHANGELOG.md
                         git commit -m "chore(release): promote build $BUILD_NUMBER" || true
                         git push origin "$CI_BRANCH"
-                        
+                
                         git checkout -B "$MASTER_BRANCH" "origin/$MASTER_BRANCH"
-                        
-                        # MERGE sin conflictos: si hay conflicto, se queda con master
+                
+                        # Merge: en conflictos preferimos master, pero AUN ASÍ blindamos al final
                         git merge --no-ff -X ours "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
-                        
-                        # Blindaje extra (por si algo tocó Jenkinsfiles)
-                        git checkout --ours JENKINSFILE 2>/dev/null || true
-                        git checkout --ours JENKINSFILE_agentes 2>/dev/null || true
-                        git add JENKINSFILE JENKINSFILE_agentes 2>/dev/null || true
+                
+                        # Blindaje absoluto: restaurar SIEMPRE los Jenkinsfiles desde origin/master
+                        git checkout "origin/$MASTER_BRANCH" -- JENKINSFILE JENKINSFILE_agentes
+                        git add JENKINSFILE JENKINSFILE_agentes
+                
+                        # Si esto cambia algo, lo metemos en el mismo commit de merge
                         git commit --amend --no-edit || true
-                        
+                
                         git push origin "$MASTER_BRANCH"
                     ''')
                 }
