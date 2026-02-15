@@ -244,39 +244,77 @@ pipeline {
             steps {
                 logAgentInfo('Promote')
                 deleteDir()
-
+        
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: "*/${env.CI_BRANCH}"]],
                     userRemoteConfigs: [[url: "${env.REPO_URL}"]],
                     extensions: [[$class: 'CloneOption', shallow: false, depth: 0, noTags: false]]
                 ])
-
+        
                 withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
-                    shLogged('Git promote develop -> master (protect Jenkinsfiles on master)', '''
+                    shLogged('Git promote develop -> master (NEVER overwrite Jenkinsfiles in master)', '''
                         git config user.name "$GIT_USER_NAME"
                         git config user.email "$GIT_USER_EMAIL"
-
+        
                         git remote set-url origin "https://$GH_TOKEN@github.com/alloci88/todo-list-aws.git"
                         git fetch origin
-
+        
+                        # Actualiza develop desde origin/develop
                         git checkout -B "$CI_BRANCH" "origin/$CI_BRANCH"
-
+        
                         echo "Promoted by Jenkins build $BUILD_NUMBER at $(date -Iseconds)" >> CHANGELOG.md
                         git add CHANGELOG.md
                         git commit -m "chore(release): promote build $BUILD_NUMBER" || true
                         git push origin "$CI_BRANCH"
-
-                        git checkout "$MASTER_BRANCH"
-                        git pull origin "$MASTER_BRANCH"
+        
+                        # Cambia a master limpio desde origin/master
+                        git checkout -B "$MASTER_BRANCH" "origin/$MASTER_BRANCH"
+        
+                        # Blindaje: guardar Jenkinsfiles de master antes del merge
+                        mkdir -p .jenkinsfile_backup
+                        cp -f JENKINSFILE .jenkinsfile_backup/JENKINSFILE
+                        cp -f JENKINSFILE_agentes .jenkinsfile_backup/JENKINSFILE_agentes
+        
+                        # Intento de merge normal
+                        set +e
                         git merge --no-ff "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
-
-                        # PROTECCIÓN REAL (nombres en mayúsculas)
-                        git checkout --ours JENKINSFILE 2>/dev/null || true
-                        git checkout --ours JENKINSFILE_agentes 2>/dev/null || true
-                        git add JENKINSFILE JENKINSFILE_agentes 2>/dev/null || true
-                        git commit --amend --no-edit || true
-
+                        MERGE_RC=$?
+                        set -e
+        
+                        if [[ "$MERGE_RC" -ne 0 ]]; then
+                            echo "Merge conflict detected. Aborting merge and retrying without Jenkinsfiles."
+        
+                            # Abortamos el merge fallido
+                            git merge --abort
+        
+                            # Reintentamos merge sin commit para poder ajustar ficheros
+                            git merge --no-ff --no-commit "origin/$CI_BRANCH"
+        
+                            # Restaurar Jenkinsfiles de master SIEMPRE
+                            cp -f .jenkinsfile_backup/JENKINSFILE JENKINSFILE
+                            cp -f .jenkinsfile_backup/JENKINSFILE_agentes JENKINSFILE_agentes
+                            git add JENKINSFILE JENKINSFILE_agentes
+        
+                            # Si quedan conflictos, no eran solo Jenkinsfiles -> error real
+                            if git diff --name-only --diff-filter=U | grep -q .; then
+                                echo "ERROR: There are unresolved conflicts besides Jenkinsfiles:"
+                                git diff --name-only --diff-filter=U || true
+                                exit 1
+                            fi
+        
+                            # Commit del merge (ya resuelto)
+                            git commit -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
+                        else
+                            # Merge automático OK -> igualmente restauramos Jenkinsfiles (regla absoluta)
+                            cp -f .jenkinsfile_backup/JENKINSFILE JENKINSFILE
+                            cp -f .jenkinsfile_backup/JENKINSFILE_agentes JENKINSFILE_agentes
+                            git add JENKINSFILE JENKINSFILE_agentes
+        
+                            # Si esto cambia algo, lo metemos en el mismo commit (amend)
+                            git commit --amend --no-edit || true
+                        fi
+        
                         git push origin "$MASTER_BRANCH"
                     ''')
                 }
