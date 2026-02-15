@@ -1,6 +1,7 @@
 /*
  * ===========================================
  * CP1.4 - Reto 2 (CD) - JENKINSFILE (master)
+ * + Reto 4 (Config repo samconfig.toml)
  * ===========================================
  *
  * Stages:
@@ -53,9 +54,15 @@ pipeline {
         // AWS
         AWS_REGION = 'us-east-1'
 
-        // Repo
+        // Repo app
         REPO_URL = 'https://github.com/alloci88/todo-list-aws.git'
         MASTER_BRANCH = 'master'
+
+        // Repo config (Reto 4)
+        CONFIG_REPO_OWNER = 'alloci88'
+        CONFIG_REPO_NAME = 'todo-list-aws-config'
+        CONFIG_BRANCH = 'production'
+        SAMCONFIG_FILE = 'samconfig.toml'
 
         // Deploy (production)
         STACK_NAME_PRODUCTION = 'todo-list-aws-production'
@@ -83,6 +90,22 @@ pipeline {
 
                 ensureReportsDirs()
 
+                withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
+                    shLogged('Download samconfig.toml (production)', '''
+                        RAW_URL="https://raw.githubusercontent.com/${CONFIG_REPO_OWNER}/${CONFIG_REPO_NAME}/${CONFIG_BRANCH}/${SAMCONFIG_FILE}"
+
+                        curl -fsSL \
+                          -H "Authorization: token $GH_TOKEN" \
+                          -H "Accept: application/vnd.github.v3.raw" \
+                          "$RAW_URL" \
+                          -o "$SAMCONFIG_FILE"
+
+                        echo "Downloaded $SAMCONFIG_FILE from $RAW_URL"
+                    ''')
+                }
+
+                requireFile(env.SAMCONFIG_FILE)
+
                 stash name: 'SRC',
                       includes: '**/*',
                       excludes: '.git/**,reports/**,**/__pycache__/**',
@@ -97,6 +120,8 @@ pipeline {
                 unstash 'SRC'
                 ensureReportsDirs()
 
+                requireFile(env.SAMCONFIG_FILE)
+
                 shLogged('SAM build', '''
                     sam build
                 ''')
@@ -105,8 +130,9 @@ pipeline {
                     sam validate --region "$AWS_REGION"
                 ''')
 
-                shLogged('SAM deploy (production, non-interactive)', '''
+                shLogged('SAM deploy (production, non-interactive, config repo)', '''
                     sam deploy \
+                      --config-file "$SAMCONFIG_FILE" \
                       --config-env production \
                       --region "$AWS_REGION" \
                       --no-confirm-changeset \
