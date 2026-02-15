@@ -1,6 +1,7 @@
 /*
  * ===========================================
  * CP1.4 - Reto 1 (CI) - Jenkinsfile (develop)
+ * + Reto 4 (Config repo samconfig.toml)
  * ===========================================
  */
 
@@ -49,10 +50,16 @@ pipeline {
         // AWS
         AWS_REGION = 'us-east-1'
 
-        // Repo
+        // Repo app
         REPO_URL = 'https://github.com/alloci88/todo-list-aws.git'
         CI_BRANCH = 'develop'
         MASTER_BRANCH = 'master'
+
+        // Repo config (Reto 4)
+        CONFIG_REPO_OWNER = 'alloci88'
+        CONFIG_REPO_NAME = 'todo-list-aws-config'
+        CONFIG_BRANCH = 'staging'
+        SAMCONFIG_FILE = 'samconfig.toml'
 
         // Static reports
         FLAKE8_OUT = 'reports/static/flake8.out'
@@ -87,6 +94,22 @@ pipeline {
                 ])
 
                 ensureReportsDirs()
+
+                withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
+                    shLogged('Download samconfig.toml (staging)', '''
+                        RAW_URL="https://raw.githubusercontent.com/${CONFIG_REPO_OWNER}/${CONFIG_REPO_NAME}/${CONFIG_BRANCH}/${SAMCONFIG_FILE}"
+
+                        curl -fsSL \
+                          -H "Authorization: token $GH_TOKEN" \
+                          -H "Accept: application/vnd.github.v3.raw" \
+                          "$RAW_URL" \
+                          -o "$SAMCONFIG_FILE"
+
+                        echo "Downloaded $SAMCONFIG_FILE from $RAW_URL"
+                    ''')
+                }
+
+                requireFile(env.SAMCONFIG_FILE)
 
                 stash name: 'SRC',
                       includes: '**/*',
@@ -146,6 +169,8 @@ pipeline {
                 unstash 'SRC'
                 ensureReportsDirs()
 
+                requireFile(env.SAMCONFIG_FILE)
+
                 shLogged('SAM build', '''
                     sam build
                 ''')
@@ -154,8 +179,9 @@ pipeline {
                     sam validate --region "$AWS_REGION"
                 ''')
 
-                shLogged('SAM deploy (staging, non-interactive)', '''
+                shLogged('SAM deploy (staging, non-interactive, config repo)', '''
                     sam deploy \
+                      --config-file "$SAMCONFIG_FILE" \
                       --config-env staging \
                       --region "$AWS_REGION" \
                       --no-confirm-changeset \
@@ -234,7 +260,6 @@ pipeline {
                         git remote set-url origin "https://$GH_TOKEN@github.com/alloci88/todo-list-aws.git"
                         git fetch origin
 
-                        # SALIR DE DETACHED HEAD: crear/actualizar rama local desde origin/develop
                         git checkout -B "$CI_BRANCH" "origin/$CI_BRANCH"
 
                         echo "Promoted by Jenkins build $BUILD_NUMBER at $(date -Iseconds)" >> CHANGELOG.md

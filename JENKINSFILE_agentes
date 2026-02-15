@@ -1,6 +1,7 @@
 /*
  * ===========================================
  * CP1.4 - Reto 3 (CI con agentes) - JENKINSFILE_agentes (develop)
+ * + Reto 4 (Config repo samconfig.toml)
  * ===========================================
  */
 
@@ -20,21 +21,19 @@ def ensureReportsDirsCI() {
 }
 
 def logAgentInfo(String stageName) {
-    sh(label: "Agent info (${stageName})", script: """#!/usr/bin/env bash
-set -euo pipefail
-echo "=== Agent info ==="
-whoami || true
-hostname || true
-echo "WORKSPACE=$WORKSPACE"
-""")
+    shLogged("Agent info (${stageName})", '''
+        echo "=== Agent info ==="
+        whoami || true
+        hostname || true
+        echo "WORKSPACE=$WORKSPACE"
+    ''')
 }
 
 def requireFile(String path) {
-    sh(label: "Require file: ${path}", script: """#!/usr/bin/env bash
-set -euo pipefail
-test -f '${path}'
-echo "OK: found ${path}"
-""")
+    shLogged("Require file: ${path}", """
+        test -f '${path}'
+        echo "OK: found ${path}"
+    """)
 }
 
 pipeline {
@@ -52,6 +51,12 @@ pipeline {
         REPO_URL = 'https://github.com/alloci88/todo-list-aws.git'
         CI_BRANCH = 'develop'
         MASTER_BRANCH = 'master'
+
+        // Repo config (Reto 4)
+        CONFIG_REPO_OWNER = 'alloci88'
+        CONFIG_REPO_NAME = 'todo-list-aws-config'
+        CONFIG_BRANCH = 'staging'
+        SAMCONFIG_FILE = 'samconfig.toml'
 
         STATIC_AGENT_LABEL = 'linux-static'
         REST_AGENT_LABEL = 'linux-rest'
@@ -87,10 +92,26 @@ pipeline {
 
                 ensureReportsDirsCI()
 
+                withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
+                    shLogged('Download samconfig.toml (staging)', '''
+                        RAW_URL="https://raw.githubusercontent.com/${CONFIG_REPO_OWNER}/${CONFIG_REPO_NAME}/${CONFIG_BRANCH}/${SAMCONFIG_FILE}"
+
+                        curl -fsSL \
+                          -H "Authorization: token $GH_TOKEN" \
+                          -H "Accept: application/vnd.github.v3.raw" \
+                          "$RAW_URL" \
+                          -o "$SAMCONFIG_FILE"
+
+                        echo "Downloaded $SAMCONFIG_FILE from $RAW_URL"
+                    ''')
+                }
+
+                requireFile(env.SAMCONFIG_FILE)
+
                 stash name: 'SRC',
-                        includes: '**/*',
-                        excludes: '.git/**,reports/**,**/__pycache__/**',
-                        useDefaultExcludes: false
+                      includes: '**/*',
+                      excludes: '.git/**,reports/**,**/__pycache__/**',
+                      useDefaultExcludes: false
             }
         }
 
@@ -147,6 +168,8 @@ pipeline {
                 unstash 'SRC'
                 ensureReportsDirsCI()
 
+                requireFile(env.SAMCONFIG_FILE)
+
                 shLogged('SAM build', '''
                     sam build
                 ''')
@@ -155,8 +178,9 @@ pipeline {
                     sam validate --region "$AWS_REGION"
                 ''')
 
-                shLogged('SAM deploy (staging, non-interactive)', '''
+                shLogged('SAM deploy (staging, non-interactive, config repo)', '''
                     sam deploy \
+                      --config-file "$SAMCONFIG_FILE" \
                       --config-env staging \
                       --region "$AWS_REGION" \
                       --no-confirm-changeset \
@@ -183,8 +207,8 @@ pipeline {
                 archiveArtifacts artifacts: 'reports/deploy/*', fingerprint: true, allowEmptyArchive: false
 
                 stash name: 'DEPLOY_META',
-                        includes: 'reports/deploy/*',
-                        useDefaultExcludes: false
+                      includes: 'reports/deploy/*',
+                      useDefaultExcludes: false
             }
         }
 
@@ -246,10 +270,9 @@ pipeline {
 
                         git checkout "$MASTER_BRANCH"
                         git pull origin "$MASTER_BRANCH"
+                        git merge --no-ff "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
 
-                        # Evita conflictos: si hay conflicto, se queda con master
-                        git merge --no-ff -X ours "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
-
+                        # PROTECCIÓN REAL (nombres en mayúsculas)
                         git checkout --ours JENKINSFILE 2>/dev/null || true
                         git checkout --ours JENKINSFILE_agentes 2>/dev/null || true
                         git add JENKINSFILE JENKINSFILE_agentes 2>/dev/null || true
