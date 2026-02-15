@@ -1,0 +1,164 @@
+/*
+ * ===========================================
+ * CP1.4 - Reto 3 (CD con agentes) - JENKINSFILE_agentes (master)
+ * ===========================================
+ */
+
+def shLogged(String label, String script) {
+    sh(label: label, script: """#!/usr/bin/env bash
+set -euo pipefail
+${script}
+""")
+}
+
+def ensureReportsDirsCD() {
+    shLogged('Ensure reports dirs', '''
+        mkdir -p reports/deploy
+        mkdir -p reports/rest
+    ''')
+}
+
+def logAgentInfo(String stageName) {
+    shLogged("Agent info (${stageName})", '''
+        echo "=== Agent info ==="
+        whoami || true
+        hostname || true
+        echo "WORKSPACE=$WORKSPACE"
+    ''')
+}
+
+def requireFile(String path) {
+    shLogged("Require file: ${path}", """
+        test -f '${path}'
+        echo "OK: found ${path}"
+    """)
+}
+
+pipeline {
+    agent none
+
+    options {
+        timestamps()
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        PYTHON_BIN = '/opt/jenkins-tools/venv/bin/python'
+        AWS_REGION = 'us-east-1'
+
+        REPO_URL = 'https://github.com/alloci88/todo-list-aws.git'
+        MASTER_BRANCH = 'master'
+
+        REST_AGENT_LABEL = 'linux-rest'
+
+        STACK_NAME_PRODUCTION = 'todo-list-aws-production'
+        API_URL_FILE = 'reports/deploy/api_url.txt'
+
+        REST_JUNIT = 'reports/rest/junit-readonly.xml'
+        INTEGRATION_TEST_FILE = 'test/integration/todoApiTest.py'
+        PYTEST_MARK = 'readonly'
+    }
+
+    stages {
+
+        stage('Get Code') {
+            agent any
+            steps {
+                logAgentInfo('Get Code')
+                deleteDir()
+
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "*/${env.MASTER_BRANCH}"]],
+                    userRemoteConfigs: [[url: "${env.REPO_URL}"]],
+                    extensions: [[$class: 'CloneOption', shallow: false, depth: 0, noTags: false]]
+                ])
+
+                ensureReportsDirsCD()
+
+                stash name: 'SRC',
+                      includes: '**/*',
+                      excludes: '.git/**,reports/**,**/__pycache__/**',
+                      useDefaultExcludes: false
+            }
+        }
+
+        stage('Deploy') {
+            agent any
+            steps {
+                logAgentInfo('Deploy')
+                deleteDir()
+                unstash 'SRC'
+                ensureReportsDirsCD()
+
+                shLogged('SAM build', '''
+                    sam build
+                ''')
+
+                shLogged('SAM validate', '''
+                    sam validate --region "$AWS_REGION"
+                ''')
+
+                shLogged('SAM deploy (production, non-interactive)', '''
+                    sam deploy \
+                      --config-env production \
+                      --region "$AWS_REGION" \
+                      --no-confirm-changeset \
+                      --no-fail-on-empty-changeset
+                ''')
+
+                shLogged('Resolve API URL from CloudFormation outputs (BaseUrlApi)', '''
+                    API_URL=$(aws --region "$AWS_REGION" cloudformation describe-stacks \
+                        --stack-name "$STACK_NAME_PRODUCTION" \
+                        --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue | [0]" \
+                        --output text)
+
+                    if [[ -z "$API_URL" || "$API_URL" == "None" ]]; then
+                        echo "ERROR: BaseUrlApi not found in stack outputs"
+                        aws --region "$AWS_REGION" cloudformation describe-stacks --stack-name "$STACK_NAME_PRODUCTION" --query "Stacks[0].Outputs" --output table || true
+                        exit 1
+                    fi
+
+                    echo "$API_URL" | tee "$API_URL_FILE"
+                ''')
+
+                requireFile(env.API_URL_FILE)
+
+                archiveArtifacts artifacts: 'reports/deploy/*', fingerprint: true, allowEmptyArchive: false
+
+                stash name: 'DEPLOY_META',
+                      includes: 'reports/deploy/*',
+                      useDefaultExcludes: false
+            }
+        }
+
+        stage('Rest Test') {
+            agent { label "${REST_AGENT_LABEL}" }
+            steps {
+                logAgentInfo('Rest Test')
+                deleteDir()
+                unstash 'SRC'
+                unstash 'DEPLOY_META'
+                ensureReportsDirsCD()
+
+                shLogged('Run Pytest READ-ONLY (abort on fail)', '''
+                    export BASE_URL="$(cat "$API_URL_FILE")"
+                    echo "BASE_URL=$BASE_URL"
+
+                    test -f "$INTEGRATION_TEST_FILE"
+
+                    "$PYTHON_BIN" -m pytest -q \
+                      --junitxml="$REST_JUNIT" \
+                      -m "$PYTEST_MARK" \
+                      "$INTEGRATION_TEST_FILE"
+                ''')
+            }
+            post {
+                always {
+                    junit testResults: 'reports/rest/*.xml', allowEmptyResults: false
+                    archiveArtifacts artifacts: 'reports/rest/*,reports/deploy/*', fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+    }
+}
