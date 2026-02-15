@@ -98,17 +98,14 @@ pipeline {
                 withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GH_TOKEN')]) {
                     shLogged('Download samconfig.toml (staging)', '''
                         RAW_URL="https://raw.githubusercontent.com/${CONFIG_REPO_OWNER}/${CONFIG_REPO_NAME}/${CONFIG_BRANCH}/${SAMCONFIG_FILE}"
-                
+
                         curl -fsSL \
                           -H "Authorization: token $GH_TOKEN" \
                           -H "Accept: application/vnd.github.v3.raw" \
                           "$RAW_URL" \
                           -o "$SAMCONFIG_FILE"
-                
+
                         echo "Downloaded $SAMCONFIG_FILE from $RAW_URL"
-                        echo "===== FIRST 30 LINES OF $SAMCONFIG_FILE ====="
-                        sed -n '1,30p' "$SAMCONFIG_FILE" || true
-                        echo "===== END ====="
                     ''')
                 }
 
