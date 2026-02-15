@@ -270,15 +270,25 @@ pipeline {
 
                         git checkout -B "$MASTER_BRANCH" "origin/$MASTER_BRANCH"
 
-                        # Merge: en conflictos preferimos master, pero AUN ASÍ blindamos al final
-                        git merge --no-ff -X ours "origin/$CI_BRANCH" -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)"
+                        # MERGE SIN COMMIT (y silenciamos output del merge para evitar “Auto-merging ...”)
+                        git merge --no-ff --no-commit -X ours "origin/$CI_BRANCH" >/dev/null 2>&1 || true
 
                         # Blindaje absoluto: restaurar SIEMPRE los Jenkinsfiles desde origin/master
                         git checkout "origin/$MASTER_BRANCH" -- JENKINSFILE JENKINSFILE_agentes
                         git add JENKINSFILE JENKINSFILE_agentes
 
-                        # Si esto cambia algo, lo metemos en el mismo commit de merge
-                        git commit --amend --no-edit || true
+                        # Si quedan conflictos fuera de Jenkinsfiles, abortar
+                        if git diff --name-only --diff-filter=U | grep -q .; then
+                            echo "ERROR: Unresolved conflicts besides Jenkinsfiles:"
+                            git diff --name-only --diff-filter=U || true
+                            exit 1
+                        fi
+
+                        # Commit de merge FINAL (único)
+                        git commit -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)" || true
+
+                        echo "FILES IN FINAL MASTER COMMIT:"
+                        git show --name-status -1 || true
 
                         git push origin "$MASTER_BRANCH"
                     ''')
