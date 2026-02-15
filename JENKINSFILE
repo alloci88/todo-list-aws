@@ -287,7 +287,7 @@ pipeline {
                         git commit -m "merge: $CI_BRANCH -> $MASTER_BRANCH (build $BUILD_NUMBER)" || true
 
                         echo "FILES IN FINAL MASTER COMMIT:"
-                        git show --name-status -1 || true
+                        git diff --name-status HEAD^1 HEAD || true
 
                         git push origin "$MASTER_BRANCH"
                     ''')
