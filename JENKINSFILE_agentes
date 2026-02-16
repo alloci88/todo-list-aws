@@ -270,7 +270,7 @@ pipeline {
 
                         git checkout -B "$MASTER_BRANCH" "origin/$MASTER_BRANCH"
 
-                        # MERGE SIN COMMIT (y silenciamos output del merge para evitar “Auto-merging ...”)
+                        # MERGE SIN COMMIT
                         git merge --no-ff --no-commit -X ours "origin/$CI_BRANCH" >/dev/null 2>&1 || true
 
                         # Blindaje absoluto: restaurar SIEMPRE los Jenkinsfiles desde origin/master
